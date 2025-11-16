@@ -60,6 +60,56 @@ The tool can parse filenames in these formats:
    - Genre
    - Track titles (can override filename-extracted titles)
 
+## Album Art Processing
+
+The tool automatically downloads and embeds album art for your audio files using the MusicBrainz database and Cover Art Archive.
+
+### How It Works
+
+1. **Search Process**: For each album, the tool searches MusicBrainz using the artist and album name extracted from filenames or `album.nfo` files
+2. **MusicBrainz ID**: If an `album.nfo` file contains a `musicbrainzreleasegroupid`, it uses that directly for faster lookup
+3. **Cover Art Download**: Downloads the front cover art from the Cover Art Archive
+4. **Fallback**: If release-group art isn't available, it attempts to find art from individual releases
+5. **Embedding**: The downloaded art is embedded directly into each audio file:
+   - **MP3 files**: Uses ID3 APIC (Attached Picture) frames
+   - **FLAC files**: Uses Vorbis comment picture blocks
+
+### Supported Image Formats
+
+The tool automatically detects and supports:
+- JPEG (most common)
+- PNG
+- GIF
+- WebP
+
+### Caching and Efficiency
+
+- **Per-Album Download**: Album art is downloaded once per album, not per track
+- **Session Cache**: Art downloaded during a session is cached in memory for all tracks from that album
+- **Persistent Logging**: Failed download attempts are logged to prevent repeated API calls for albums without available art
+- **Rate Limiting**: Includes a 0.5-second delay between API requests to respect MusicBrainz rate limits
+
+### What Gets Embedded
+
+- **Image Type**: Front cover (type 3 in ID3/Vorbis standards)
+- **Description**: "Cover"
+- **Replacement**: Existing album art is removed before embedding new art
+
+### Handling Failures
+
+- If album art cannot be found, the script continues processing metadata without art
+- Failed attempts are logged so the tool won't retry the same album in future runs
+- You'll see messages like:
+  - `✓ Found album art` - Successfully downloaded and embedded
+  - `⚠ No album art found` - Art not available for this album
+  - `⊘ Album art already attempted (skipping download)` - Previously tried, skipping
+
+### Data Sources
+
+- **MusicBrainz API**: Used to search for release groups and releases
+- **Cover Art Archive**: Provides the actual cover art images
+- Both services are free and open-source, requiring no API keys
+
 ## JSON Logging
 
 The script maintains a `metadata_repair_log.json` file to track:
@@ -81,4 +131,6 @@ The log file is automatically created and updated. You can delete it to force re
 - Files are only re-processed if they've been modified since the last run
 - Album art is downloaded once per album and embedded in all tracks from that album
 - The script respects MusicBrainz API rate limits with delays between requests
+- For large collections, processing may take longer due to API calls for album art
+- Network connectivity is required for album art downloads
 
