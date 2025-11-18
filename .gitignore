@@ -4,6 +4,12 @@ metadata_repair_log.json
 # Libraries configuration
 music_libraries.json
 
+# Build artifacts
+build/
+dist/
+*.spec
+installer/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -14,6 +20,11 @@ env/
 venv/
 ENV/
 .venv
+*.pyc
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
 
 # IDE
 .vscode/

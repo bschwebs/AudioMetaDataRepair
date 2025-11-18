@@ -2,3 +2,6 @@ mutagen>=1.47.0
 requests>=2.31.0
 PySide6>=6.5.0
 
+# Build dependencies (optional)
+# pyinstaller>=5.13.0
+
