@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Processing Results - Audio Metadata Repair Tool</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 Processing Results</h1>
+        </header>
+
+        <main>
+            {% if results.status == 'error' %}
+                <div class="error-box">
+                    <h2>Error</h2>
+                    <p>{{ results.message }}</p>
+                </div>
+            {% elif results.status == 'completed' %}
+                <div class="success-box">
+                    <h2>✅ Processing Complete!</h2>
+                </div>
+
+                <div class="results-summary">
+                    <h3>Summary</h3>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-number">{{ results.results.total_files }}</div>
+                            <div class="stat-label">Total Files</div>
+                        </div>
+                        <div class="stat-card success">
+                            <div class="stat-number">{{ results.results.success_count }}</div>
+                            <div class="stat-label">Successfully Processed</div>
+                        </div>
+                        <div class="stat-card warning">
+                            <div class="stat-number">{{ results.results.skipped_count }}</div>
+                            <div class="stat-label">Skipped</div>
+                        </div>
+                        <div class="stat-card error">
+                            <div class="stat-number">{{ results.results.fail_count }}</div>
+                            <div class="stat-label">Failed</div>
+                        </div>
+                        {% if results.results.nfo_generated > 0 %}
+                        <div class="stat-card info">
+                            <div class="stat-number">{{ results.results.nfo_generated }}</div>
+                            <div class="stat-label">NFO Files Generated</div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <a href="/" class="btn-primary">Process Another Directory</a>
+                </div>
+            {% else %}
+                <div class="info-box">
+                    <p>Processing status: {{ results.status }}</p>
+                </div>
+            {% endif %}
+        </main>
+
+        <footer>
+            <p>Audio Metadata Repair Tool - Flask Web Interface</p>
+        </footer>
+    </div>
+</body>
+</html>
+

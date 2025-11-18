@@ -1,6 +1,9 @@
 # Log file
 metadata_repair_log.json
 
+# Libraries configuration
+music_libraries.json
+
 # Python
 __pycache__/
 *.py[cod]

@@ -2,6 +2,14 @@
 
 A Python tool to repair metadata for MP3 and FLAC audio files by extracting information from filenames and optional `album.nfo` files.
 
+## Available Versions
+
+- **Command Line** (`main.py`): Simple CLI tool for batch processing
+- **Web Application** (`app.py`): Flask-based web interface
+- **Desktop Application** (`app_desktop.py`): Native Windows GUI with advanced features (recommended)
+
+See `README_DESKTOP.md` for details on the desktop application features.
+
 ## Features
 
 - Automatically scans for MP3 and FLAC files recursively
@@ -10,6 +18,10 @@ A Python tool to repair metadata for MP3 and FLAC audio files by extracting info
 - Updates ID3 tags for MP3 files and Vorbis comments for FLAC files
 - Handles common metadata fields: title, artist, album, track number, year, genre, album artist
 - Downloads and embeds album art from MusicBrainz Cover Art Archive
+- Fix filenames to match standard format (desktop app only)
+- Music library management with custom nicknames (desktop app only)
+- Report generation in text, HTML, or CSV formats (desktop app only)
+- Retry failed album art downloads with MusicBrainz IDs (desktop app only)
 - JSON logging to track processed files and prevent duplicate work
 - Skips files that have already been processed (unless modified)
 - Skips album art downloads for albums that have already been attempted
