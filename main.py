@@ -29,15 +29,15 @@ def main():
     print(f"Scanning for audio files in: {target_dir.absolute()}")
     print("-" * 60)
     
-    # Find all MP3 and FLAC files
-    audio_extensions = {'.mp3', '.flac'}
+    # Find all supported audio files
+    audio_extensions = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.mp4'}
     audio_files = []
     
     for ext in audio_extensions:
         audio_files.extend(target_dir.rglob(f'*{ext}'))
     
     if not audio_files:
-        print("No MP3 or FLAC files found!")
+        print("No supported audio files found!")
         return
     
     print(f"Found {len(audio_files)} audio file(s)")

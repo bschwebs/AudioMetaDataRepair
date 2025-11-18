@@ -242,15 +242,15 @@ class ProcessingThread(QThread):
             log_file = DEFAULT_LOG_FILE
             log_data = audio_repair.load_log(log_file)
             
-            # Find all MP3 and FLAC files
-            audio_extensions = {'.mp3', '.flac'}
+            # Find all supported audio files
+            audio_extensions = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.mp4'}
             audio_files = []
             
             for ext in audio_extensions:
                 audio_files.extend(self.target_dir.rglob(f'*{ext}'))
             
             if not audio_files:
-                self.error_occurred.emit('No MP3 or FLAC files found!')
+                self.error_occurred.emit('No supported audio files found!')
                 return
             
             total_files = len(audio_files)
@@ -279,8 +279,9 @@ class ProcessingThread(QThread):
                         
                         # Get metadata from file tags if needed
                         file_metadata = {}
-                        if audio_file.suffix.lower() == '.mp3':
-                            try:
+                        suffix = audio_file.suffix.lower()
+                        try:
+                            if suffix == '.mp3':
                                 mp3_file = MP3(str(audio_file))
                                 file_metadata = {
                                     'artist': mp3_file.get('TPE1', [''])[0] or mp3_file.get('TPE2', [''])[0],
@@ -288,10 +289,7 @@ class ProcessingThread(QThread):
                                     'title': mp3_file.get('TIT2', [''])[0],
                                     'tracknumber': int(mp3_file.get('TRCK', ['0'])[0].split('/')[0]) if mp3_file.get('TRCK') else 0
                                 }
-                            except:
-                                pass
-                        elif audio_file.suffix.lower() == '.flac':
-                            try:
+                            elif suffix == '.flac':
                                 flac_file = FLAC(str(audio_file))
                                 file_metadata = {
                                     'artist': flac_file.get('ARTIST', [''])[0] or flac_file.get('ALBUMARTIST', [''])[0],
@@ -299,8 +297,27 @@ class ProcessingThread(QThread):
                                     'title': flac_file.get('TITLE', [''])[0],
                                     'tracknumber': int(flac_file.get('TRACKNUMBER', ['0'])[0].split('/')[0]) if flac_file.get('TRACKNUMBER') else 0
                                 }
-                            except:
-                                pass
+                            elif suffix in ('.ogg', '.opus'):
+                                from mutagen import File as MutagenFile
+                                ogg_file = MutagenFile(str(audio_file))
+                                if ogg_file:
+                                    file_metadata = {
+                                        'artist': ogg_file.get('ARTIST', [''])[0] or ogg_file.get('ALBUMARTIST', [''])[0],
+                                        'album': ogg_file.get('ALBUM', [''])[0],
+                                        'title': ogg_file.get('TITLE', [''])[0],
+                                        'tracknumber': int(ogg_file.get('TRACKNUMBER', ['0'])[0].split('/')[0]) if ogg_file.get('TRACKNUMBER') else 0
+                                    }
+                            elif suffix in ('.m4a', '.mp4'):
+                                from mutagen.mp4 import MP4
+                                m4a_file = MP4(str(audio_file))
+                                file_metadata = {
+                                    'artist': m4a_file.get('\xa9ART', [''])[0] or m4a_file.get('aART', [''])[0],
+                                    'album': m4a_file.get('\xa9alb', [''])[0],
+                                    'title': m4a_file.get('\xa9nam', [''])[0],
+                                    'tracknumber': m4a_file.get('trkn', [(0, 0)])[0][0] if m4a_file.get('trkn') else 0
+                                }
+                        except:
+                            pass
                         
                         # Try to fix filename
                         if audio_repair.fix_filename(audio_file, file_metadata, album_metadata):
@@ -351,18 +368,28 @@ class ProcessingThread(QThread):
                                 album_art, _ = audio_repair.get_album_art(artist, album)
                                 album_art_cache[album_key] = album_art
                                 if album_art:
-                                    if audio_file.suffix.lower() == '.mp3':
+                                    suffix = audio_file.suffix.lower()
+                                    if suffix == '.mp3':
                                         audio_repair.embed_album_art_mp3(audio_file, album_art)
-                                    elif audio_file.suffix.lower() == '.flac':
+                                    elif suffix == '.flac':
                                         audio_repair.embed_album_art_flac(audio_file, album_art)
+                                    elif suffix in ('.ogg', '.opus'):
+                                        audio_repair.embed_album_art_ogg(audio_file, album_art)
+                                    elif suffix in ('.m4a', '.mp4'):
+                                        audio_repair.embed_album_art_mp4(audio_file, album_art)
                                 time.sleep(0.5)
                             else:
                                 album_art = album_art_cache[album_key]
                                 if album_art:
-                                    if audio_file.suffix.lower() == '.mp3':
+                                    suffix = audio_file.suffix.lower()
+                                    if suffix == '.mp3':
                                         audio_repair.embed_album_art_mp3(audio_file, album_art)
-                                    elif audio_file.suffix.lower() == '.flac':
+                                    elif suffix == '.flac':
                                         audio_repair.embed_album_art_flac(audio_file, album_art)
+                                    elif suffix in ('.ogg', '.opus'):
+                                        audio_repair.embed_album_art_ogg(audio_file, album_art)
+                                    elif suffix in ('.m4a', '.mp4'):
+                                        audio_repair.embed_album_art_mp4(audio_file, album_art)
                         
                         result = True
                         metadata = {

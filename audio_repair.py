@@ -16,6 +16,10 @@ from mutagen.id3 import ID3, TIT2, TPE1, TALB, TRCK, TDRC, TCON, TPE2, APIC
 from mutagen.mp3 import MP3
 from mutagen.flac import FLAC
 from mutagen.flac import Picture
+from mutagen.oggvorbis import OggVorbis
+from mutagen.oggopus import OggOpus
+from mutagen.mp4 import MP4
+from mutagen import File as MutagenFile
 
 
 # ============================================================================
@@ -322,6 +326,72 @@ def embed_album_art_flac(file_path: Path, image_data: bytes, mime_type: str = 'i
         return False
 
 
+def embed_album_art_ogg(file_path: Path, image_data: bytes, mime_type: str = 'image/jpeg'):
+    """Embed album art into an OGG Vorbis or Opus file."""
+    try:
+        # Try to detect OGG type
+        audio_file = MutagenFile(str(file_path))
+        
+        if audio_file is None:
+            return False
+        
+        # Remove existing cover art
+        if 'metadata_block_picture' in audio_file:
+            del audio_file['metadata_block_picture']
+        if 'METADATA_BLOCK_PICTURE' in audio_file:
+            del audio_file['METADATA_BLOCK_PICTURE']
+        
+        # Create picture block (same format as FLAC)
+        picture = Picture()
+        picture.type = 3  # Cover (front)
+        picture.mime = mime_type
+        picture.data = image_data
+        
+        # Encode picture as base64
+        import base64
+        picture_data = picture.write()
+        encoded = base64.b64encode(picture_data).decode('ascii')
+        
+        # Add to file (OGG uses metadata_block_picture)
+        audio_file['metadata_block_picture'] = [encoded]
+        audio_file.save()
+        return True
+    except Exception as e:
+        print(f"  Error embedding album art: {e}")
+        return False
+
+
+def embed_album_art_mp4(file_path: Path, image_data: bytes, mime_type: str = 'image/jpeg'):
+    """Embed album art into an MP4/M4A file."""
+    try:
+        audio_file = MP4(str(file_path))
+        
+        # Remove existing cover art
+        if 'covr' in audio_file:
+            del audio_file['covr']
+        
+        # Add cover art
+        # MP4 uses a list of cover art objects
+        from mutagen.mp4 import MP4Cover
+        
+        # Determine image format
+        if 'jpeg' in mime_type or 'jpg' in mime_type:
+            image_format = MP4Cover.FORMAT_JPEG
+        elif 'png' in mime_type:
+            image_format = MP4Cover.FORMAT_PNG
+        else:
+            image_format = MP4Cover.FORMAT_JPEG  # Default to JPEG
+        
+        cover = MP4Cover(image_data, imageformat=image_format)
+        audio_file['covr'] = [cover]
+        
+        audio_file.save()
+        return True
+    except Exception as e:
+        print(f"  Error embedding album art: {e}")
+        return False
+
+
 # ============================================================================
 # Parsing Functions
 # ============================================================================
@@ -507,8 +577,9 @@ def fix_filename(file_path: Path, metadata: Dict, album_metadata: Optional[Dict]
         
         # If still missing, try to read from file tags
         if not artist or not album or not track_number or not title:
-            if file_path.suffix.lower() == '.mp3':
-                try:
+            suffix = file_path.suffix.lower()
+            try:
+                if suffix == '.mp3':
                     audio_file = MP3(str(file_path))
                     if not artist:
                         artist = audio_file.get('TPE1', [''])[0] or audio_file.get('TPE2', [''])[0]
@@ -522,10 +593,7 @@ def fix_filename(file_path: Path, metadata: Dict, album_metadata: Optional[Dict]
                             track_number = 0
                     if not title:
                         title = audio_file.get('TIT2', [''])[0]
-                except:
-                    pass
-            elif file_path.suffix.lower() == '.flac':
-                try:
+                elif suffix == '.flac':
                     audio_file = FLAC(str(file_path))
                     if not artist:
                         artist = audio_file.get('ARTIST', [''])[0] or audio_file.get('ALBUMARTIST', [''])[0]
@@ -539,8 +607,35 @@ def fix_filename(file_path: Path, metadata: Dict, album_metadata: Optional[Dict]
                             track_number = 0
                     if not title:
                         title = audio_file.get('TITLE', [''])[0]
-                except:
-                    pass
+                elif suffix in ('.ogg', '.opus'):
+                    audio_file = MutagenFile(str(file_path))
+                    if audio_file:
+                        if not artist:
+                            artist = audio_file.get('ARTIST', [''])[0] or audio_file.get('ALBUMARTIST', [''])[0]
+                        if not album:
+                            album = audio_file.get('ALBUM', [''])[0]
+                        if not track_number:
+                            track_num_str = audio_file.get('TRACKNUMBER', ['0'])[0]
+                            try:
+                                track_number = int(track_num_str.split('/')[0])
+                            except:
+                                track_number = 0
+                        if not title:
+                            title = audio_file.get('TITLE', [''])[0]
+                elif suffix in ('.m4a', '.mp4'):
+                    audio_file = MP4(str(file_path))
+                    if not artist:
+                        artist = audio_file.get('\xa9ART', [''])[0] or audio_file.get('aART', [''])[0]
+                    if not album:
+                        album = audio_file.get('\xa9alb', [''])[0]
+                    if not track_number:
+                        track_list = audio_file.get('trkn', [(0, 0)])
+                        if track_list:
+                            track_number = track_list[0][0]
+                    if not title:
+                        title = audio_file.get('\xa9nam', [''])[0]
+            except:
+                pass
         
         # Check if we have all required fields
         if not artist or not album or not track_number or not title:
@@ -706,6 +801,120 @@ def repair_flac_metadata(file_path: Path, metadata: Dict, album_metadata: Option
         return False
 
 
+def repair_ogg_metadata(file_path: Path, metadata: Dict, album_metadata: Optional[Dict] = None, album_art: Optional[bytes] = None):
+    """Repair metadata for OGG Vorbis or Opus files."""
+    try:
+        audio_file = MutagenFile(str(file_path))
+        
+        if audio_file is None:
+            return False
+        
+        # Set metadata tags (OGG uses Vorbis comment format)
+        if 'title' in metadata:
+            audio_file['TITLE'] = metadata['title']
+        
+        if 'artist' in metadata:
+            audio_file['ARTIST'] = metadata['artist']
+        
+        if 'album' in metadata:
+            audio_file['ALBUM'] = metadata['album']
+        
+        if 'tracknumber' in metadata:
+            audio_file['TRACKNUMBER'] = str(metadata['tracknumber'])
+        
+        # Use album metadata if available
+        if album_metadata:
+            if album_metadata.get('album') and not metadata.get('album'):
+                audio_file['ALBUM'] = album_metadata['album']
+            
+            if album_metadata.get('albumartist'):
+                audio_file['ALBUMARTIST'] = album_metadata['albumartist']
+            elif album_metadata.get('artist'):
+                audio_file['ALBUMARTIST'] = album_metadata['artist']
+            
+            if album_metadata.get('year'):
+                audio_file['DATE'] = album_metadata['year']
+            
+            if album_metadata.get('genre'):
+                audio_file['GENRE'] = album_metadata['genre']
+            
+            # Update track title from album.nfo if available
+            if 'tracknumber' in metadata:
+                track_num = metadata['tracknumber']
+                if track_num in album_metadata.get('tracks', {}):
+                    audio_file['TITLE'] = album_metadata['tracks'][track_num]
+        
+        audio_file.save()
+        
+        # Embed album art if provided
+        if album_art:
+            # Detect MIME type
+            mime_type = 'image/jpeg'
+            if album_art.startswith(b'\x89PNG'):
+                mime_type = 'image/png'
+            elif album_art.startswith(b'GIF'):
+                mime_type = 'image/gif'
+            elif album_art.startswith(b'RIFF') and b'WEBP' in album_art[:12]:
+                mime_type = 'image/webp'
+            
+            embed_album_art_ogg(file_path, album_art, mime_type)
+        return True
+    except Exception as e:
+        print(f"Error repairing {file_path}: {e}")
+        return False
+
+
+def repair_mp4_metadata(file_path: Path, metadata: Dict, album_metadata: Optional[Dict] = None, album_art: Optional[bytes] = None):
+    """Repair metadata for MP4/M4A files."""
+    try:
+        audio_file = MP4(str(file_path))
+        
+        # Set metadata tags
+        if 'title' in metadata:
+            audio_file['\xa9nam'] = metadata['title']  # Title
+        
+        if 'artist' in metadata:
+            audio_file['\xa9ART'] = metadata['artist']  # Artist
+        
+        if 'album' in metadata:
+            audio_file['\xa9alb'] = metadata['album']  # Album
+        
+        if 'tracknumber' in metadata:
+            audio_file['trkn'] = [(metadata['tracknumber'], 0)]  # Track number, total tracks
+        
+        # Use album metadata if available
+        if album_metadata:
+            if album_metadata.get('album') and not metadata.get('album'):
+                audio_file['\xa9alb'] = album_metadata['album']
+            
+            if album_metadata.get('albumartist'):
+                audio_file['aART'] = album_metadata['albumartist']  # Album Artist
+            elif album_metadata.get('artist'):
+                audio_file['aART'] = album_metadata['artist']
+            
+            if album_metadata.get('year'):
+                audio_file['\xa9day'] = album_metadata['year']  # Date/Year
+            
+            if album_metadata.get('genre'):
+                audio_file['\xa9gen'] = album_metadata['genre']  # Genre
+            
+            # Update track title from album.nfo if available
+            if 'tracknumber' in metadata:
+                track_num = metadata['tracknumber']
+                if track_num in album_metadata.get('tracks', {}):
+                    audio_file['\xa9nam'] = album_metadata['tracks'][track_num]
+        
+        audio_file.save()
+        
+        # Embed album art if provided
+        if album_art:
+            embed_album_art_mp4(file_path, album_art)
+        return True
+    except Exception as e:
+        print(f"Error repairing {file_path}: {e}")
+        return False
+
+
 def repair_audio_file(file_path: Path, base_dir: Path, album_art_cache: Dict[str, Optional[bytes]], 
                       log_data: Dict, log_file: Path) -> Tuple[bool, Optional[Dict]]:
     """
@@ -781,10 +990,16 @@ def repair_audio_file(file_path: Path, base_dir: Path, album_art_cache: Dict[str
     
     # Repair based on file type
     success = False
-    if file_path.suffix.lower() == '.mp3':
+    suffix = file_path.suffix.lower()
+    
+    if suffix == '.mp3':
         success = repair_mp3_metadata(file_path, metadata, album_metadata, album_art)
-    elif file_path.suffix.lower() == '.flac':
+    elif suffix == '.flac':
         success = repair_flac_metadata(file_path, metadata, album_metadata, album_art)
+    elif suffix in ('.ogg', '.opus'):
+        success = repair_ogg_metadata(file_path, metadata, album_metadata, album_art)
+    elif suffix in ('.m4a', '.mp4'):
+        success = repair_mp4_metadata(file_path, metadata, album_metadata, album_art)
     else:
         print(f"Unsupported file type: {file_path.suffix}")
         return False, None

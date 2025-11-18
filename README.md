@@ -11,10 +11,14 @@ See `README_DESKTOP.md` for details on the desktop application features.
 
 ## Features
 
-- Automatically scans for MP3 and FLAC files recursively
+- Automatically scans for MP3, FLAC, OGG, Opus, and M4A/MP4 files recursively
 - Extracts metadata from filenames (supports format: `Artist - Album - TrackNumber - Title.ext`)
 - Optionally reads metadata from `album.nfo` files if present
-- Updates ID3 tags for MP3 files and Vorbis comments for FLAC files
+- Updates metadata tags for multiple formats:
+  - **MP3**: ID3 tags
+  - **FLAC**: Vorbis comments
+  - **OGG/Opus**: Vorbis comments
+  - **M4A/MP4**: iTunes-style tags
 - Handles common metadata fields: title, artist, album, track number, year, genre, album artist
 - Downloads and embeds album art from MusicBrainz Cover Art Archive
 - Fix filenames to match standard format (desktop app only)
@@ -84,6 +88,8 @@ The tool automatically downloads and embeds album art for your audio files using
 5. **Embedding**: The downloaded art is embedded directly into each audio file:
    - **MP3 files**: Uses ID3 APIC (Attached Picture) frames
    - **FLAC files**: Uses Vorbis comment picture blocks
+   - **OGG/Opus files**: Uses Vorbis comment metadata_block_picture
+   - **M4A/MP4 files**: Uses MP4 covr atom
 
 ### Supported Image Formats
 

@@ -1,6 +1,6 @@
 # Audio Metadata Repair Tool - Windows Desktop Application
 
-A native Windows desktop application for repairing metadata, downloading album art, and generating NFO files for MP3 and FLAC audio files.
+A native Windows desktop application for repairing metadata, downloading album art, and generating NFO files for MP3, FLAC, OGG, Opus, and M4A/MP4 audio files.
 
 ## Features
 
@@ -74,8 +74,11 @@ A native Windows desktop application for repairing metadata, downloading album a
 
 ### Repair Metadata
 - Extracts metadata from filenames (format: `Artist - Album - TrackNumber - Title.ext`)
-- Updates ID3 tags for MP3 files
-- Updates Vorbis comments for FLAC files
+- Updates metadata tags for multiple formats:
+  - **MP3**: ID3 tags
+  - **FLAC**: Vorbis comments
+  - **OGG/Opus**: Vorbis comments
+  - **M4A/MP4**: iTunes-style tags
 - Uses album.nfo files if available for additional metadata
 
 ### Download Album Art
