@@ -142,10 +142,10 @@ To create a standalone `.exe` file using PyInstaller:
 
 3. The executable will be in the `dist` folder
 
-## Comparison: Web vs Desktop
+## Technical Details
 
-- **Web Version** (`app.py`): Accessible from any browser, can be hosted on a server
-- **Desktop Version** (`app_desktop.py`): Native Windows application, no browser needed, better integration with Windows
-
-Both versions use the same underlying `audio_repair.py` module and provide the same functionality.
+- **Framework**: PySide6 (Qt for Python)
+- **Threading**: Uses QThread for non-blocking file processing
+- **UI**: Native Windows controls and dialogs
+- **Progress Tracking**: Real-time progress updates
 

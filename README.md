@@ -5,7 +5,6 @@ A Python tool to repair metadata for MP3 and FLAC audio files by extracting info
 ## Available Versions
 
 - **Command Line** (`main.py`): Simple CLI tool for batch processing
-- **Web Application** (`app.py`): Flask-based web interface
 - **Desktop Application** (`app_desktop.py`): Native Windows GUI with advanced features (recommended)
 
 See `README_DESKTOP.md` for details on the desktop application features.
