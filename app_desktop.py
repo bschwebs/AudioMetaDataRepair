@@ -326,10 +326,8 @@ class ProcessingThread(QThread):
             log_data = audio_repair.load_log(log_file)
             
             # Find all supported audio files
-            audio_extensions = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.mp4'}
             audio_files = []
-            
-            for ext in audio_extensions:
+            for ext in audio_repair.SUPPORTED_EXTENSIONS:
                 audio_files.extend(self.target_dir.rglob(f'*{ext}'))
             
             if not audio_files:
