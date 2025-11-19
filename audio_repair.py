@@ -1,25 +1,49 @@
 #!/usr/bin/env python3
 """
 Audio Metadata Repair Module
+
 Contains all functions for repairing audio file metadata and downloading album art.
+Supports MP3, FLAC, OGG, Opus, and M4A/MP4 formats.
 """
 
-import re
+# Standard library imports
+import base64
 import json
-import xml.etree.ElementTree as ET
-import requests
+import re
 import time
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Tuple
-from mutagen.id3 import ID3, TIT2, TPE1, TALB, TRCK, TDRC, TCON, TPE2, APIC
-from mutagen.mp3 import MP3
-from mutagen.flac import FLAC
-from mutagen.flac import Picture
-from mutagen.oggvorbis import OggVorbis
-from mutagen.oggopus import OggOpus
-from mutagen.mp4 import MP4
+from typing import Callable, Dict, List, Optional, Tuple
+
+# Third-party imports
+import requests
 from mutagen import File as MutagenFile
+from mutagen.flac import FLAC, Picture
+from mutagen.id3 import APIC, ID3, TALB, TCON, TDRC, TIT2, TPE1, TPE2, TRCK
+from mutagen.mp3 import MP3
+from mutagen.mp4 import MP4, MP4Cover
+
+# Constants
+MUSICBRAINZ_API_URL = "https://musicbrainz.org/ws/2"
+COVER_ART_ARCHIVE_URL = "https://coverartarchive.org"
+USER_AGENT = "AudioMetadataRepair/2.0 (https://github.com/bschwebs/AudioMetaDataRepair)"
+API_TIMEOUT = 10
+API_RATE_LIMIT_DELAY = 0.5
+
+# Supported audio file extensions
+SUPPORTED_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.mp4'}
+
+# Image MIME type detection signatures
+IMAGE_SIGNATURES = {
+    b'\x89PNG': 'image/png',
+    b'GIF87a': 'image/gif',
+    b'GIF89a': 'image/gif',
+    b'RIFF': 'image/webp',  # Checked with WEBP in header
+}
+
+# Default MIME type
+DEFAULT_MIME_TYPE = 'image/jpeg'
 
 
 # ============================================================================
@@ -27,23 +51,35 @@ from mutagen import File as MutagenFile
 # ============================================================================
 
 def load_log(log_file: Path) -> Dict:
-    """Load the processing log from JSON file."""
-    if log_file.exists():
-        try:
-            with open(log_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
-            print(f"Warning: Could not load log file: {e}")
-            print("Starting with empty log.")
+    """
+    Load the processing log from JSON file.
+
+    Args:
+        log_file: Path to the log file
+
+    Returns:
+        Dictionary containing log data with 'processed_files' and 'album_art' keys
+    """
+    if not log_file.exists():
+        return {'processed_files': {}, 'album_art': {}}
     
-    return {
-        'processed_files': {},
-        'album_art': {}
-    }
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"Warning: Could not load log file: {e}")
+        print("Starting with empty log.")
+        return {'processed_files': {}, 'album_art': {}}
 
 
-def save_log(log_data: Dict, log_file: Path):
-    """Save the processing log to JSON file."""
+def save_log(log_data: Dict, log_file: Path) -> None:
+    """
+    Save the processing log to JSON file.
+
+    Args:
+        log_data: Dictionary containing log data
+        log_file: Path to the log file
+    """
     try:
         with open(log_file, 'w', encoding='utf-8') as f:
             json.dump(log_data, f, indent=2, ensure_ascii=False)
@@ -52,33 +88,45 @@ def save_log(log_data: Dict, log_file: Path):
 
 
 def is_file_processed(file_path: Path, log_data: Dict) -> bool:
-    """Check if a file has already been processed and hasn't been modified since."""
+    """
+    Check if a file has already been processed and hasn't been modified since.
+
+    Args:
+        file_path: Path to the file to check
+        log_data: Dictionary containing log data
+
+    Returns:
+        True if file was processed and hasn't been modified, False otherwise
+    """
     file_str = str(file_path)
+    processed_files = log_data.get('processed_files', {})
     
-    if file_str not in log_data.get('processed_files', {}):
+    if file_str not in processed_files:
         return False
     
-    file_info = log_data['processed_files'][file_str]
-    
-    # Check if file still exists and hasn't been modified
     if not file_path.exists():
         return False
     
     try:
+        file_info = processed_files[file_str]
         current_mtime = file_path.stat().st_mtime
         logged_mtime = file_info.get('file_mtime', 0)
         
-        # If file was modified after last processing, it needs reprocessing
-        if current_mtime > logged_mtime:
-            return False
-        
-        return True
+        # File needs reprocessing if it was modified after last processing
+        return current_mtime <= logged_mtime
     except OSError:
         return False
 
 
-def mark_file_processed(file_path: Path, log_data: Dict, has_art: bool = False):
-    """Mark a file as processed in the log."""
+def mark_file_processed(file_path: Path, log_data: Dict, has_art: bool = False) -> None:
+    """
+    Mark a file as processed in the log.
+
+    Args:
+        file_path: Path to the processed file
+        log_data: Dictionary containing log data
+        has_art: Whether the file has album art embedded
+    """
     file_str = str(file_path)
     
     try:
@@ -97,7 +145,17 @@ def mark_file_processed(file_path: Path, log_data: Dict, has_art: bool = False):
 
 
 def has_album_art_downloaded(artist: str, album: str, log_data: Dict) -> bool:
-    """Check if album art has already been downloaded for this album."""
+    """
+    Check if album art has already been downloaded for this album.
+
+    Args:
+        artist: Artist name
+        album: Album name
+        log_data: Dictionary containing log data
+
+    Returns:
+        True if album art was successfully downloaded, False otherwise
+    """
     album_key = f"{artist}||{album}"
     album_art_data = log_data.get('album_art', {})
     
@@ -107,8 +165,16 @@ def has_album_art_downloaded(artist: str, album: str, log_data: Dict) -> bool:
     return album_art_data[album_key].get('downloaded', False)
 
 
-def get_failed_albums(log_data: Dict) -> list:
-    """Get list of albums that failed to download art, with their MusicBrainz IDs if available."""
+def get_failed_albums(log_data: Dict) -> List[Dict[str, str]]:
+    """
+    Get list of albums that failed to download art.
+
+    Args:
+        log_data: Dictionary containing log data
+
+    Returns:
+        List of dictionaries with artist, album, musicbrainz_id, and last_attempted keys
+    """
     failed_albums = []
     album_art_data = log_data.get('album_art', {})
     
@@ -125,10 +191,25 @@ def get_failed_albums(log_data: Dict) -> list:
     return failed_albums
 
 
-def retry_album_art_with_id(artist: str, album: str, musicbrainz_id: str, log_data: Dict, log_file: Path) -> Tuple[bool, Optional[bytes]]:
+def retry_album_art_with_id(
+    artist: str,
+    album: str,
+    musicbrainz_id: str,
+    log_data: Dict,
+    log_file: Path
+) -> Tuple[bool, Optional[bytes]]:
     """
     Retry downloading album art using a specific MusicBrainz release group ID.
-    Returns (success: bool, image_data: Optional[bytes])
+
+    Args:
+        artist: Artist name
+        album: Album name
+        musicbrainz_id: MusicBrainz release group ID
+        log_data: Dictionary containing log data
+        log_file: Path to the log file
+
+    Returns:
+        Tuple of (success: bool, image_data: Optional[bytes])
     """
     try:
         album_art_data, found_mb_id = get_album_art(artist, album, musicbrainz_id)
@@ -144,16 +225,19 @@ def retry_album_art_with_id(artist: str, album: str, musicbrainz_id: str, log_da
         return False, None
 
 
-def batch_search_musicbrainz_ids(failed_albums: list, progress_callback=None) -> Dict[str, str]:
+def batch_search_musicbrainz_ids(
+    failed_albums: List[Dict[str, str]],
+    progress_callback: Optional[Callable[[str, str], None]] = None
+) -> Dict[str, str]:
     """
     Batch search for MusicBrainz IDs for multiple albums.
-    
+
     Args:
-        failed_albums: List of dicts with 'artist' and 'album' keys
+        failed_albums: List of dictionaries with 'artist' and 'album' keys
         progress_callback: Optional callback function(album_key, mb_id) for progress updates
-    
+
     Returns:
-        Dictionary mapping album_key (artist||album) to MusicBrainz ID (or empty string if not found)
+        Dictionary mapping album_key (artist||album) to MusicBrainz ID or empty string
     """
     results = {}
     
@@ -172,14 +256,29 @@ def batch_search_musicbrainz_ids(failed_albums: list, progress_callback=None) ->
         if progress_callback:
             progress_callback(album_key, mb_id or '')
         
-        # Be polite to the API
-        time.sleep(0.5)
+        # Respect API rate limits
+        time.sleep(API_RATE_LIMIT_DELAY)
     
     return results
 
 
-def mark_album_art_downloaded(artist: str, album: str, log_data: Dict, success: bool, musicbrainz_id: Optional[str] = None):
-    """Mark album art as downloaded (or attempted) in the log."""
+def mark_album_art_downloaded(
+    artist: str,
+    album: str,
+    log_data: Dict,
+    success: bool,
+    musicbrainz_id: Optional[str] = None
+) -> None:
+    """
+    Mark album art as downloaded (or attempted) in the log.
+
+    Args:
+        artist: Artist name
+        album: Album name
+        log_data: Dictionary containing log data
+        success: Whether the download was successful
+        musicbrainz_id: Optional MusicBrainz release group ID
+    """
     album_key = f"{artist}||{album}"
     
     if 'album_art' not in log_data:
@@ -199,74 +298,84 @@ def mark_album_art_downloaded(artist: str, album: str, log_data: Dict, success: 
 def search_musicbrainz_release_group(artist: str, album: str) -> Optional[str]:
     """
     Search MusicBrainz for a release group ID.
-    Returns the release group ID if found, None otherwise.
+
+    Args:
+        artist: Artist name
+        album: Album name
+
+    Returns:
+        Release group ID if found, None otherwise
     """
     try:
-        search_url = "https://musicbrainz.org/ws/2/release-group"
+        search_url = f"{MUSICBRAINZ_API_URL}/release-group"
         params = {
             'query': f'artist:"{artist}" AND release:"{album}"',
             'fmt': 'json',
             'limit': 1
         }
         
-        headers = {
-            'User-Agent': 'AudioMetadataRepair/1.0 (https://github.com/yourusername)'
-        }
+        headers = {'User-Agent': USER_AGENT}
         
-        response = requests.get(search_url, params=params, headers=headers, timeout=10)
+        response = requests.get(
+            search_url,
+            params=params,
+            headers=headers,
+            timeout=API_TIMEOUT
+        )
         response.raise_for_status()
         data = response.json()
         
-        if not data.get('release-groups'):
+        release_groups = data.get('release-groups', [])
+        if not release_groups:
             return None
         
-        return data['release-groups'][0]['id']
+        return release_groups[0]['id']
     except Exception as e:
         print(f"  Warning: Could not search MusicBrainz: {e}")
         return None
 
 
-def get_album_art(artist: str, album: str, musicbrainz_release_group_id: Optional[str] = None) -> Tuple[Optional[bytes], Optional[str]]:
+def get_album_art(
+    artist: str,
+    album: str,
+    musicbrainz_release_group_id: Optional[str] = None
+) -> Tuple[Optional[bytes], Optional[str]]:
     """
     Download album art from Cover Art Archive (MusicBrainz).
-    Returns tuple: (image data as bytes, release_group_id) or (None, release_group_id) if not found.
+
+    Args:
+        artist: Artist name
+        album: Album name
+        musicbrainz_release_group_id: Optional MusicBrainz release group ID
+
+    Returns:
+        Tuple of (image data as bytes, release_group_id) or (None, release_group_id) if not found
     """
     try:
-        # If we have a MusicBrainz release group ID, use it directly
-        if musicbrainz_release_group_id:
-            release_group_id = musicbrainz_release_group_id
-        else:
-            # Search MusicBrainz for the release group
+        # Use provided ID or search for it
+        release_group_id = musicbrainz_release_group_id
+        if not release_group_id:
             release_group_id = search_musicbrainz_release_group(artist, album)
             if not release_group_id:
                 return None, None
         
-        # Get cover art from Cover Art Archive
-        cover_art_url = f"https://coverartarchive.org/release-group/{release_group_id}/front"
+        # Try to get cover art from release group
+        cover_art_url = f"{COVER_ART_ARCHIVE_URL}/release-group/{release_group_id}/front"
+        headers = {'User-Agent': USER_AGENT}
         
-        headers = {
-            'User-Agent': 'AudioMetadataRepair/1.0 (https://github.com/yourusername)'
-        }
-        
-        response = requests.get(cover_art_url, headers=headers, timeout=10, allow_redirects=True)
+        response = requests.get(
+            cover_art_url,
+            headers=headers,
+            timeout=API_TIMEOUT,
+            allow_redirects=True
+        )
         
         if response.status_code == 200:
             return response.content, release_group_id
-        elif response.status_code == 404:
-            # Try to get from releases instead
-            releases_url = f"https://musicbrainz.org/ws/2/release-group/{release_group_id}"
-            params = {'inc': 'releases', 'fmt': 'json'}
-            response = requests.get(releases_url, params=params, headers=headers, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                releases = data.get('releases', [])
-                if releases:
-                    release_id = releases[0]['id']
-                    cover_art_url = f"https://coverartarchive.org/release/{release_id}/front"
-                    response = requests.get(cover_art_url, headers=headers, timeout=10, allow_redirects=True)
-                    if response.status_code == 200:
-                        return response.content, release_group_id
+        
+        if response.status_code == 404:
+            # Fallback: try individual releases
+            return _try_release_art(release_group_id, headers)
         
         return None, release_group_id
     except Exception as e:
@@ -274,8 +383,92 @@ def get_album_art(artist: str, album: str, musicbrainz_release_group_id: Optiona
         return None, None
 
 
-def embed_album_art_mp3(file_path: Path, image_data: bytes, mime_type: str = 'image/jpeg'):
-    """Embed album art into an MP3 file."""
+def _try_release_art(release_group_id: str, headers: Dict[str, str]) -> Tuple[Optional[bytes], Optional[str]]:
+    """
+    Try to get album art from individual releases as fallback.
+
+    Args:
+        release_group_id: MusicBrainz release group ID
+        headers: HTTP headers to use
+
+    Returns:
+        Tuple of (image data, release_group_id) or (None, release_group_id)
+    """
+    try:
+        releases_url = f"{MUSICBRAINZ_API_URL}/release-group/{release_group_id}"
+        params = {'inc': 'releases', 'fmt': 'json'}
+        
+        response = requests.get(
+            releases_url,
+            params=params,
+            headers=headers,
+            timeout=API_TIMEOUT
+        )
+        
+        if response.status_code != 200:
+            return None, release_group_id
+        
+        data = response.json()
+        releases = data.get('releases', [])
+        if not releases:
+            return None, release_group_id
+        
+        # Try first release
+        release_id = releases[0]['id']
+        cover_art_url = f"{COVER_ART_ARCHIVE_URL}/release/{release_id}/front"
+        
+        response = requests.get(
+            cover_art_url,
+            headers=headers,
+            timeout=API_TIMEOUT,
+            allow_redirects=True
+        )
+        
+        if response.status_code == 200:
+            return response.content, release_group_id
+        
+        return None, release_group_id
+    except Exception:
+        return None, release_group_id
+
+
+def detect_mime_type(image_data: bytes) -> str:
+    """
+    Detect MIME type from image data signature.
+
+    Args:
+        image_data: Image file data as bytes
+
+    Returns:
+        MIME type string (defaults to 'image/jpeg')
+    """
+    # Check PNG signature
+    if image_data[:4] == b'\x89PNG':
+        return 'image/png'
+    
+    # Check GIF signatures
+    if image_data[:6] in (b'GIF87a', b'GIF89a'):
+        return 'image/gif'
+    
+    # Check WebP signature (RIFF header with WEBP in bytes 8-12)
+    if image_data[:4] == b'RIFF' and b'WEBP' in image_data[8:12]:
+        return 'image/webp'
+    
+    return DEFAULT_MIME_TYPE
+
+
+def embed_album_art_mp3(file_path: Path, image_data: bytes, mime_type: str = DEFAULT_MIME_TYPE):
+    """
+    Embed album art into an MP3 file.
+
+    Args:
+        file_path: Path to the MP3 file
+        image_data: Image data as bytes
+        mime_type: MIME type of the image
+
+    Returns:
+        True if successful, False otherwise
+    """
     try:
         audio_file = MP3(str(file_path), ID3=ID3)
         
@@ -286,12 +479,12 @@ def embed_album_art_mp3(file_path: Path, image_data: bytes, mime_type: str = 'im
         if 'APIC:' in audio_file.tags:
             del audio_file.tags['APIC:']
         
-        # Add new album art
+        # Add new album art (type 3 = Cover front)
         audio_file.tags.add(
             APIC(
                 encoding=3,
                 mime=mime_type,
-                type=3,  # Cover (front)
+                type=3,
                 desc='Cover',
                 data=image_data
             )
@@ -304,17 +497,25 @@ def embed_album_art_mp3(file_path: Path, image_data: bytes, mime_type: str = 'im
         return False
 
 
-def embed_album_art_flac(file_path: Path, image_data: bytes, mime_type: str = 'image/jpeg'):
-    """Embed album art into a FLAC file."""
+def embed_album_art_flac(file_path: Path, image_data: bytes, mime_type: str = DEFAULT_MIME_TYPE):
+    """
+    Embed album art into a FLAC file.
+
+    Args:
+        file_path: Path to the FLAC file
+        image_data: Image data as bytes
+        mime_type: MIME type of the image
+
+    Returns:
+        True if successful, False otherwise
+    """
     try:
         audio_file = FLAC(str(file_path))
-        
-        # Remove existing pictures
         audio_file.clear_pictures()
         
-        # Create picture block
+        # Create picture block (type 3 = Cover front)
         picture = Picture()
-        picture.type = 3  # Cover (front)
+        picture.type = 3
         picture.mime = mime_type
         picture.data = image_data
         
@@ -326,33 +527,38 @@ def embed_album_art_flac(file_path: Path, image_data: bytes, mime_type: str = 'i
         return False
 
 
-def embed_album_art_ogg(file_path: Path, image_data: bytes, mime_type: str = 'image/jpeg'):
-    """Embed album art into an OGG Vorbis or Opus file."""
+def embed_album_art_ogg(file_path: Path, image_data: bytes, mime_type: str = DEFAULT_MIME_TYPE):
+    """
+    Embed album art into an OGG Vorbis or Opus file.
+
+    Args:
+        file_path: Path to the OGG file
+        image_data: Image data as bytes
+        mime_type: MIME type of the image
+
+    Returns:
+        True if successful, False otherwise
+    """
     try:
-        # Try to detect OGG type
         audio_file = MutagenFile(str(file_path))
-        
         if audio_file is None:
             return False
         
         # Remove existing cover art
-        if 'metadata_block_picture' in audio_file:
-            del audio_file['metadata_block_picture']
-        if 'METADATA_BLOCK_PICTURE' in audio_file:
-            del audio_file['METADATA_BLOCK_PICTURE']
+        for key in ('metadata_block_picture', 'METADATA_BLOCK_PICTURE'):
+            if key in audio_file:
+                del audio_file[key]
         
-        # Create picture block (same format as FLAC)
+        # Create picture block (same format as FLAC, type 3 = Cover front)
         picture = Picture()
-        picture.type = 3  # Cover (front)
+        picture.type = 3
         picture.mime = mime_type
         picture.data = image_data
         
-        # Encode picture as base64
-        import base64
+        # Encode picture as base64 for OGG format
         picture_data = picture.write()
         encoded = base64.b64encode(picture_data).decode('ascii')
         
-        # Add to file (OGG uses metadata_block_picture)
         audio_file['metadata_block_picture'] = [encoded]
         audio_file.save()
         return True
@@ -361,8 +567,18 @@ def embed_album_art_ogg(file_path: Path, image_data: bytes, mime_type: str = 'im
         return False
 
 
-def embed_album_art_mp4(file_path: Path, image_data: bytes, mime_type: str = 'image/jpeg'):
-    """Embed album art into an MP4/M4A file."""
+def embed_album_art_mp4(file_path: Path, image_data: bytes, mime_type: str = DEFAULT_MIME_TYPE):
+    """
+    Embed album art into an MP4/M4A file.
+
+    Args:
+        file_path: Path to the MP4/M4A file
+        image_data: Image data as bytes
+        mime_type: MIME type of the image
+
+    Returns:
+        True if successful, False otherwise
+    """
     try:
         audio_file = MP4(str(file_path))
         
@@ -370,21 +586,14 @@ def embed_album_art_mp4(file_path: Path, image_data: bytes, mime_type: str = 'im
         if 'covr' in audio_file:
             del audio_file['covr']
         
-        # Add cover art
-        # MP4 uses a list of cover art objects
-        from mutagen.mp4 import MP4Cover
-        
         # Determine image format
-        if 'jpeg' in mime_type or 'jpg' in mime_type:
-            image_format = MP4Cover.FORMAT_JPEG
-        elif 'png' in mime_type:
+        if 'png' in mime_type:
             image_format = MP4Cover.FORMAT_PNG
         else:
             image_format = MP4Cover.FORMAT_JPEG  # Default to JPEG
         
         cover = MP4Cover(image_data, imageformat=image_format)
         audio_file['covr'] = [cover]
-        
         audio_file.save()
         return True
     except Exception as e:
@@ -397,7 +606,15 @@ def embed_album_art_mp4(file_path: Path, image_data: bytes, mime_type: str = 'im
 # ============================================================================
 
 def parse_album_nfo(nfo_path: Path) -> Optional[Dict]:
-    """Parse album.nfo file and extract metadata."""
+    """
+    Parse album.nfo file and extract metadata.
+
+    Args:
+        nfo_path: Path to the album.nfo file
+
+    Returns:
+        Dictionary containing album metadata and tracks, or None if parsing fails
+    """
     try:
         tree = ET.parse(nfo_path)
         root = tree.getroot()
@@ -428,11 +645,14 @@ def parse_album_nfo(nfo_path: Path) -> Optional[Dict]:
 def generate_album_nfo(nfo_path: Path, album_metadata: Dict, tracks: Dict[int, str]) -> bool:
     """
     Generate an album.nfo file with the provided metadata and track information.
-    
+
     Args:
         nfo_path: Path where the album.nfo file should be created
         album_metadata: Dictionary containing album-level metadata
         tracks: Dictionary mapping track numbers to track titles
+
+    Returns:
+        True if successful, False otherwise
     """
     try:
         # Create root element
@@ -519,6 +739,13 @@ def generate_album_nfo(nfo_path: Path, album_metadata: Dict, tracks: Dict[int, s
 def parse_filename(filename: str) -> Optional[Dict]:
     """
     Parse filename to extract metadata.
+
+    Args:
+        filename: Filename to parse (with or without extension)
+
+    Returns:
+        Dictionary with artist, album, tracknumber, and title keys, or None if parsing fails
+
     Expected format: "Artist - Album - TrackNumber - Title.ext"
     """
     # Remove extension
@@ -683,8 +910,24 @@ def fix_filename(file_path: Path, metadata: Dict, album_metadata: Optional[Dict]
 # Repair Functions
 # ============================================================================
 
-def repair_mp3_metadata(file_path: Path, metadata: Dict, album_metadata: Optional[Dict] = None, album_art: Optional[bytes] = None):
-    """Repair metadata for MP3 files."""
+def repair_mp3_metadata(
+    file_path: Path,
+    metadata: Dict,
+    album_metadata: Optional[Dict] = None,
+    album_art: Optional[bytes] = None
+) -> bool:
+    """
+    Repair metadata for MP3 files.
+
+    Args:
+        file_path: Path to the MP3 file
+        metadata: Dictionary containing track metadata
+        album_metadata: Optional album-level metadata
+        album_art: Optional album art image data
+
+    Returns:
+        True if successful, False otherwise
+    """
     try:
         audio_file = MP3(str(file_path), ID3=ID3)
         
@@ -727,14 +970,7 @@ def repair_mp3_metadata(file_path: Path, metadata: Dict, album_metadata: Optiona
         
         # Embed album art if provided
         if album_art:
-            # Detect MIME type from image data
-            mime_type = 'image/jpeg'
-            if album_art.startswith(b'\x89PNG'):
-                mime_type = 'image/png'
-            elif album_art.startswith(b'GIF'):
-                mime_type = 'image/gif'
-            elif album_art.startswith(b'RIFF') and b'WEBP' in album_art[:12]:
-                mime_type = 'image/webp'
+            mime_type = detect_mime_type(album_art)
             embed_album_art_mp3(file_path, album_art, mime_type)
         
         audio_file.save()
@@ -744,8 +980,24 @@ def repair_mp3_metadata(file_path: Path, metadata: Dict, album_metadata: Optiona
         return False
 
 
-def repair_flac_metadata(file_path: Path, metadata: Dict, album_metadata: Optional[Dict] = None, album_art: Optional[bytes] = None):
-    """Repair metadata for FLAC files."""
+def repair_flac_metadata(
+    file_path: Path,
+    metadata: Dict,
+    album_metadata: Optional[Dict] = None,
+    album_art: Optional[bytes] = None
+) -> bool:
+    """
+    Repair metadata for FLAC files.
+
+    Args:
+        file_path: Path to the FLAC file
+        metadata: Dictionary containing track metadata
+        album_metadata: Optional album-level metadata
+        album_art: Optional album art image data
+
+    Returns:
+        True if successful, False otherwise
+    """
     try:
         audio_file = FLAC(str(file_path))
         
@@ -784,14 +1036,7 @@ def repair_flac_metadata(file_path: Path, metadata: Dict, album_metadata: Option
         
         # Embed album art if provided
         if album_art:
-            # Detect MIME type from image data
-            mime_type = 'image/jpeg'
-            if album_art.startswith(b'\x89PNG'):
-                mime_type = 'image/png'
-            elif album_art.startswith(b'GIF'):
-                mime_type = 'image/gif'
-            elif album_art.startswith(b'RIFF') and b'WEBP' in album_art[:12]:
-                mime_type = 'image/webp'
+            mime_type = detect_mime_type(album_art)
             embed_album_art_flac(file_path, album_art, mime_type)
         
         audio_file.save()
@@ -801,8 +1046,24 @@ def repair_flac_metadata(file_path: Path, metadata: Dict, album_metadata: Option
         return False
 
 
-def repair_ogg_metadata(file_path: Path, metadata: Dict, album_metadata: Optional[Dict] = None, album_art: Optional[bytes] = None):
-    """Repair metadata for OGG Vorbis or Opus files."""
+def repair_ogg_metadata(
+    file_path: Path,
+    metadata: Dict,
+    album_metadata: Optional[Dict] = None,
+    album_art: Optional[bytes] = None
+) -> bool:
+    """
+    Repair metadata for OGG Vorbis or Opus files.
+
+    Args:
+        file_path: Path to the OGG file
+        metadata: Dictionary containing track metadata
+        album_metadata: Optional album-level metadata
+        album_art: Optional album art image data
+
+    Returns:
+        True if successful, False otherwise
+    """
     try:
         audio_file = MutagenFile(str(file_path))
         
@@ -848,15 +1109,7 @@ def repair_ogg_metadata(file_path: Path, metadata: Dict, album_metadata: Optiona
         
         # Embed album art if provided
         if album_art:
-            # Detect MIME type
-            mime_type = 'image/jpeg'
-            if album_art.startswith(b'\x89PNG'):
-                mime_type = 'image/png'
-            elif album_art.startswith(b'GIF'):
-                mime_type = 'image/gif'
-            elif album_art.startswith(b'RIFF') and b'WEBP' in album_art[:12]:
-                mime_type = 'image/webp'
-            
+            mime_type = detect_mime_type(album_art)
             embed_album_art_ogg(file_path, album_art, mime_type)
         return True
     except Exception as e:
@@ -864,8 +1117,24 @@ def repair_ogg_metadata(file_path: Path, metadata: Dict, album_metadata: Optiona
         return False
 
 
-def repair_mp4_metadata(file_path: Path, metadata: Dict, album_metadata: Optional[Dict] = None, album_art: Optional[bytes] = None):
-    """Repair metadata for MP4/M4A files."""
+def repair_mp4_metadata(
+    file_path: Path,
+    metadata: Dict,
+    album_metadata: Optional[Dict] = None,
+    album_art: Optional[bytes] = None
+) -> bool:
+    """
+    Repair metadata for MP4/M4A files.
+
+    Args:
+        file_path: Path to the MP4/M4A file
+        metadata: Dictionary containing track metadata
+        album_metadata: Optional album-level metadata
+        album_art: Optional album art image data
+
+    Returns:
+        True if successful, False otherwise
+    """
     try:
         audio_file = MP4(str(file_path))
         
@@ -977,8 +1246,8 @@ def repair_audio_file(file_path: Path, base_dir: Path, album_art_cache: Dict[str
                 mark_album_art_downloaded(artist, album, log_data, album_art_data is not None, found_mb_id)
                 # Save log after each album art download attempt
                 save_log(log_data, log_file)
-                # Be polite to the API
-                time.sleep(0.5)
+                # Respect API rate limits
+                time.sleep(API_RATE_LIMIT_DELAY)
                 album_art = album_art_data
             else:
                 album_art = album_art_cache[album_key]

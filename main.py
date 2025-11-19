@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """
 Audio Metadata Repair Tool
-Main entry point for repairing metadata for MP3 and FLAC files.
+
+Main entry point for repairing metadata for audio files.
+Supports MP3, FLAC, OGG, Opus, and M4A/MP4 formats.
 """
 
+# Standard library imports
 from pathlib import Path
+
+# Local imports
 import audio_repair
 
-# Default log file path
+# Constants
 DEFAULT_LOG_FILE = Path('metadata_repair_log.json')
+SUPPORTED_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.mp4'}
 
 
 def main():
@@ -30,10 +36,8 @@ def main():
     print("-" * 60)
     
     # Find all supported audio files
-    audio_extensions = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.mp4'}
     audio_files = []
-    
-    for ext in audio_extensions:
+    for ext in SUPPORTED_EXTENSIONS:
         audio_files.extend(target_dir.rglob(f'*{ext}'))
     
     if not audio_files:
