@@ -60,17 +60,37 @@ def generate_text_report(log_data: dict) -> str:
     report.append(f"Failed Downloads: {failed_downloads}")
     report.append("")
     
-    # Failed albums with MusicBrainz IDs
+    # Failed objects section
+    report.append("FAILED OBJECTS")
+    report.append("-" * 70)
+    
+    # Files without album art
+    files_without_art = [(path, info) for path, info in processed_files.items() if not info.get('has_art', False)]
+    if files_without_art:
+        report.append(f"Files Without Album Art: {len(files_without_art)}")
+        report.append("")
+        for file_path, file_info in sorted(files_without_art)[:50]:  # Show first 50
+            last_processed = file_info.get('last_processed', 'Unknown')
+            report.append(f"  ✗ {file_path}")
+            report.append(f"      Last Processed: {last_processed}")
+        if len(files_without_art) > 50:
+            report.append(f"  ... and {len(files_without_art) - 50} more files without art")
+        report.append("")
+    
+    # Failed album art downloads
     if failed_downloads > 0:
-        report.append("FAILED ALBUM ART DOWNLOADS")
-        report.append("-" * 70)
+        report.append(f"Failed Album Art Downloads: {failed_downloads}")
+        report.append("")
         for album_key, art_info in sorted(album_art.items()):
             if not art_info.get('downloaded', False):
                 mb_id = art_info.get('musicbrainz_release_group_id', '') or 'Not found'
                 last_downloaded = art_info.get('last_downloaded', 'Unknown')
-                report.append(f"{album_key.replace('||', ' - ')}")
-                report.append(f"    MusicBrainz ID: {mb_id}")
-                report.append(f"    Last Attempted: {last_downloaded}")
+                report.append(f"  ✗ {album_key.replace('||', ' - ')}")
+                report.append(f"      MusicBrainz ID: {mb_id}")
+                report.append(f"      Last Attempted: {last_downloaded}")
+        report.append("")
+    else:
+        report.append("No failed album art downloads.")
         report.append("")
     
     # Recent processing activity
@@ -160,8 +180,44 @@ def generate_html_report(log_data: dict) -> str:
     
     html.append("</table>")
     
-    # Album art table
-    html.append("<h2>Album Art Downloads</h2>")
+    # Failed objects section
+    html.append("<h2>Failed Objects</h2>")
+    
+    # Files without album art
+    files_without_art = [(path, info) for path, info in processed_files.items() if not info.get('has_art', False)]
+    if files_without_art:
+        html.append("<h3>Files Without Album Art</h3>")
+        html.append(f"<p>Total: {len(files_without_art)} files</p>")
+        html.append("<table>")
+        html.append("<tr><th>File</th><th>Last Processed</th></tr>")
+        
+        for file_path, file_info in sorted(files_without_art)[:100]:  # Show first 100
+            last_processed = file_info.get('last_processed', 'Unknown')
+            html.append(f"<tr><td>{file_path}</td><td>{last_processed}</td></tr>")
+        
+        html.append("</table>")
+        if len(files_without_art) > 100:
+            html.append(f"<p><em>... and {len(files_without_art) - 100} more files</em></p>")
+    
+    # Failed album art downloads
+    failed_albums = [(key, info) for key, info in album_art.items() if not info.get('downloaded', False)]
+    if failed_albums:
+        html.append("<h3>Failed Album Art Downloads</h3>")
+        html.append(f"<p>Total: {len(failed_albums)} albums</p>")
+        html.append("<table>")
+        html.append("<tr><th>Album</th><th>MusicBrainz ID</th><th>Last Attempted</th></tr>")
+        
+        for album_key, art_info in sorted(failed_albums):
+            mb_id = art_info.get('musicbrainz_release_group_id', '') or 'Not found'
+            last_downloaded = art_info.get('last_downloaded', 'Unknown')
+            html.append(f"<tr><td>{album_key.replace('||', ' - ')}</td><td>{mb_id}</td><td>{last_downloaded}</td></tr>")
+        
+        html.append("</table>")
+    else:
+        html.append("<p>No failed album art downloads.</p>")
+    
+    # Album art table (all albums)
+    html.append("<h2>All Album Art Downloads</h2>")
     html.append("<table>")
     html.append("<tr><th>Album</th><th>Status</th><th>MusicBrainz ID</th><th>Last Attempted</th></tr>")
     
@@ -199,9 +255,36 @@ def generate_csv_report(log_data: dict, output_path: Path):
                 file_info.get('file_mtime', '')
             ])
         
-        # Write album art downloads
+        # Write failed objects
         writer.writerow([])
-        writer.writerow(['=== ALBUM ART DOWNLOADS ==='])
+        writer.writerow(['=== FAILED OBJECTS ==='])
+        
+        # Files without album art
+        files_without_art = [(path, info) for path, info in processed_files.items() if not info.get('has_art', False)]
+        if files_without_art:
+            writer.writerow(['--- Files Without Album Art ---'])
+            writer.writerow(['File Path', 'Last Processed', 'File Modified Time'])
+            for file_path, file_info in sorted(files_without_art):
+                writer.writerow([
+                    file_path,
+                    file_info.get('last_processed', ''),
+                    file_info.get('file_mtime', '')
+                ])
+        
+        # Failed album art downloads
+        failed_albums = [(key, info) for key, info in album_art.items() if not info.get('downloaded', False)]
+        if failed_albums:
+            writer.writerow([])
+            writer.writerow(['--- Failed Album Art Downloads ---'])
+            writer.writerow(['Album', 'MusicBrainz ID', 'Last Attempted'])
+            for album_key, art_info in sorted(failed_albums):
+                mb_id = art_info.get('musicbrainz_release_group_id', '') or 'Not found'
+                last_downloaded = art_info.get('last_downloaded', 'Unknown')
+                writer.writerow([album_key.replace('||', ' - '), mb_id, last_downloaded])
+        
+        # Write all album art downloads
+        writer.writerow([])
+        writer.writerow(['=== ALL ALBUM ART DOWNLOADS ==='])
         writer.writerow(['Album', 'Status', 'MusicBrainz ID', 'Last Attempted'])
         
         for album_key, art_info in sorted(album_art.items()):
