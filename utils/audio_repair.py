@@ -602,6 +602,300 @@ def embed_album_art_mp4(file_path: Path, image_data: bytes, mime_type: str = DEF
 
 
 # ============================================================================
+# Report Generation Functions
+# ============================================================================
+
+def generate_text_report(log_data: dict) -> str:
+    """
+    Generate a text report from log data.
+
+    Args:
+        log_data: Dictionary containing log data
+
+    Returns:
+        Formatted text report as string
+    """
+    report = []
+    report.append("=" * 70)
+    report.append("AUDIO METADATA REPAIR - PROCESSING REPORT")
+    report.append("=" * 70)
+    report.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    report.append("")
+    
+    # Processed files summary
+    processed_files = log_data.get('processed_files', {})
+    report.append("PROCESSED FILES SUMMARY")
+    report.append("-" * 70)
+    report.append(f"Total Files Processed: {len(processed_files)}")
+    
+    files_with_art = sum(1 for f in processed_files.values() if f.get('has_art', False))
+    report.append(f"Files with Album Art: {files_with_art}")
+    report.append(f"Files without Album Art: {len(processed_files) - files_with_art}")
+    report.append("")
+    
+    # Album art summary
+    album_art = log_data.get('album_art', {})
+    report.append("ALBUM ART SUMMARY")
+    report.append("-" * 70)
+    report.append(f"Total Albums Attempted: {len(album_art)}")
+    
+    successful_downloads = sum(1 for a in album_art.values() if a.get('downloaded', False))
+    failed_downloads = len(album_art) - successful_downloads
+    report.append(f"Successful Downloads: {successful_downloads}")
+    report.append(f"Failed Downloads: {failed_downloads}")
+    report.append("")
+    
+    # Failed objects section
+    report.append("FAILED OBJECTS")
+    report.append("-" * 70)
+    
+    # Files without album art
+    files_without_art = [(path, info) for path, info in processed_files.items() if not info.get('has_art', False)]
+    if files_without_art:
+        report.append(f"Files Without Album Art: {len(files_without_art)}")
+        report.append("")
+        for file_path, file_info in sorted(files_without_art)[:50]:  # Show first 50
+            last_processed = file_info.get('last_processed', 'Unknown')
+            report.append(f"  ✗ {file_path}")
+            report.append(f"      Last Processed: {last_processed}")
+        if len(files_without_art) > 50:
+            report.append(f"  ... and {len(files_without_art) - 50} more files without art")
+        report.append("")
+    
+    # Failed album art downloads
+    if failed_downloads > 0:
+        report.append(f"Failed Album Art Downloads: {failed_downloads}")
+        report.append("")
+        for album_key, art_info in sorted(album_art.items()):
+            if not art_info.get('downloaded', False):
+                mb_id = art_info.get('musicbrainz_release_group_id', '') or 'Not found'
+                last_downloaded = art_info.get('last_downloaded', 'Unknown')
+                report.append(f"  ✗ {album_key.replace('||', ' - ')}")
+                report.append(f"      MusicBrainz ID: {mb_id}")
+                report.append(f"      Last Attempted: {last_downloaded}")
+        report.append("")
+    else:
+        report.append("No failed album art downloads.")
+        report.append("")
+    
+    # Recent processing activity
+    report.append("RECENT PROCESSING ACTIVITY")
+    report.append("-" * 70)
+    
+    # Sort files by last processed date
+    sorted_files = sorted(
+        processed_files.items(),
+        key=lambda x: x[1].get('last_processed', ''),
+        reverse=True
+    )[:20]  # Show last 20 files
+    
+    for file_path, file_info in sorted_files:
+        last_processed = file_info.get('last_processed', 'Unknown')
+        has_art = '✓' if file_info.get('has_art', False) else '✗'
+        report.append(f"{has_art} {file_path}")
+        report.append(f"    Last Processed: {last_processed}")
+    
+    if len(processed_files) > 20:
+        report.append(f"\n... and {len(processed_files) - 20} more files")
+    
+    report.append("")
+    report.append("=" * 70)
+    
+    return "\n".join(report)
+
+
+def generate_html_report(log_data: dict) -> str:
+    """
+    Generate an HTML report from log data.
+
+    Args:
+        log_data: Dictionary containing log data
+
+    Returns:
+        Formatted HTML report as string
+    """
+    html = []
+    html.append("<!DOCTYPE html>")
+    html.append("<html><head>")
+    html.append("<title>Audio Metadata Repair - Processing Report</title>")
+    html.append("<style>")
+    html.append("body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; color: #212529; }")
+    html.append(".container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }")
+    html.append("h1 { color: #667eea; font-size: 28px; margin-bottom: 10px; }")
+    html.append("h2 { color: #212529; border-bottom: 2px solid #667eea; padding-bottom: 10px; margin-top: 30px; font-size: 20px; }")
+    html.append("p { color: #212529; line-height: 1.6; }")
+    html.append(".stat { display: inline-block; margin: 10px 20px 10px 0; padding: 15px; background: #f8f9fa; border-radius: 5px; border: 1px solid #dee2e6; }")
+    html.append(".stat-number { font-size: 24px; font-weight: bold; color: #667eea; }")
+    html.append(".stat-label { color: #495057; font-size: 12px; font-weight: 500; }")
+    html.append("table { width: 100%; border-collapse: collapse; margin-top: 20px; background: white; }")
+    html.append("th, td { padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; color: #212529; }")
+    html.append("th { background: #667eea; color: white; font-weight: bold; }")
+    html.append("tr:nth-child(even) { background: #f8f9fa; }")
+    html.append("tr:hover { background: #e9ecef; }")
+    html.append("td { color: #212529; }")
+    html.append(".has-art { color: #28a745; font-weight: bold; }")
+    html.append(".no-art { color: #6c757d; }")
+    html.append("</style>")
+    html.append("</head><body>")
+    html.append("<div class='container'>")
+    html.append(f"<h1>Audio Metadata Repair - Processing Report</h1>")
+    html.append(f"<p><strong>Generated:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>")
+    
+    # Summary stats
+    processed_files = log_data.get('processed_files', {})
+    album_art = log_data.get('album_art', {})
+    files_with_art = sum(1 for f in processed_files.values() if f.get('has_art', False))
+    successful_downloads = sum(1 for a in album_art.values() if a.get('downloaded', False))
+    
+    html.append("<h2>Summary</h2>")
+    html.append("<div class='stat'><div class='stat-number'>{}</div><div class='stat-label'>Files Processed</div></div>".format(len(processed_files)))
+    html.append("<div class='stat'><div class='stat-number'>{}</div><div class='stat-label'>Files with Art</div></div>".format(files_with_art))
+    html.append("<div class='stat'><div class='stat-number'>{}</div><div class='stat-label'>Albums Attempted</div></div>".format(len(album_art)))
+    html.append("<div class='stat'><div class='stat-number'>{}</div><div class='stat-label'>Successful Downloads</div></div>".format(successful_downloads))
+    
+    # Processed files table
+    html.append("<h2>Processed Files</h2>")
+    html.append("<table>")
+    html.append("<tr><th>File</th><th>Last Processed</th><th>Has Art</th></tr>")
+    
+    sorted_files = sorted(
+        processed_files.items(),
+        key=lambda x: x[1].get('last_processed', ''),
+        reverse=True
+    )[:100]  # Show last 100 files
+    
+    for file_path, file_info in sorted_files:
+        last_processed = file_info.get('last_processed', 'Unknown')
+        has_art = file_info.get('has_art', False)
+        art_class = "has-art" if has_art else "no-art"
+        art_symbol = "✓" if has_art else "✗"
+        html.append(f"<tr><td>{file_path}</td><td>{last_processed}</td><td class='{art_class}'>{art_symbol}</td></tr>")
+    
+    html.append("</table>")
+    
+    # Failed objects section
+    html.append("<h2>Failed Objects</h2>")
+    
+    # Files without album art
+    files_without_art = [(path, info) for path, info in processed_files.items() if not info.get('has_art', False)]
+    if files_without_art:
+        html.append("<h3>Files Without Album Art</h3>")
+        html.append(f"<p>Total: {len(files_without_art)} files</p>")
+        html.append("<table>")
+        html.append("<tr><th>File</th><th>Last Processed</th></tr>")
+        
+        for file_path, file_info in sorted(files_without_art)[:100]:  # Show first 100
+            last_processed = file_info.get('last_processed', 'Unknown')
+            html.append(f"<tr><td>{file_path}</td><td>{last_processed}</td></tr>")
+        
+        html.append("</table>")
+        if len(files_without_art) > 100:
+            html.append(f"<p><em>... and {len(files_without_art) - 100} more files</em></p>")
+    
+    # Failed album art downloads
+    failed_albums = [(key, info) for key, info in album_art.items() if not info.get('downloaded', False)]
+    if failed_albums:
+        html.append("<h3>Failed Album Art Downloads</h3>")
+        html.append(f"<p>Total: {len(failed_albums)} albums</p>")
+        html.append("<table>")
+        html.append("<tr><th>Album</th><th>MusicBrainz ID</th><th>Last Attempted</th></tr>")
+        
+        for album_key, art_info in sorted(failed_albums):
+            mb_id = art_info.get('musicbrainz_release_group_id', '') or 'Not found'
+            last_downloaded = art_info.get('last_downloaded', 'Unknown')
+            html.append(f"<tr><td>{album_key.replace('||', ' - ')}</td><td>{mb_id}</td><td>{last_downloaded}</td></tr>")
+        
+        html.append("</table>")
+    else:
+        html.append("<p>No failed album art downloads.</p>")
+    
+    # Album art table (all albums)
+    html.append("<h2>All Album Art Downloads</h2>")
+    html.append("<table>")
+    html.append("<tr><th>Album</th><th>Status</th><th>MusicBrainz ID</th><th>Last Attempted</th></tr>")
+    
+    for album_key, art_info in sorted(album_art.items()):
+        status = "Success" if art_info.get('downloaded', False) else "Failed"
+        status_class = "has-art" if art_info.get('downloaded', False) else "no-art"
+        mb_id = art_info.get('musicbrainz_release_group_id', '')
+        if not mb_id:
+            mb_id = 'Not found'
+        last_downloaded = art_info.get('last_downloaded', 'Unknown')
+        html.append(f"<tr><td>{album_key.replace('||', ' - ')}</td><td class='{status_class}'>{status}</td><td>{mb_id}</td><td>{last_downloaded}</td></tr>")
+    
+    html.append("</table>")
+    html.append("</div></body></html>")
+    
+    return "\n".join(html)
+
+
+def generate_csv_report(log_data: dict, output_path: Path) -> None:
+    """
+    Generate a CSV report from log data.
+
+    Args:
+        log_data: Dictionary containing log data
+        output_path: Path where the CSV file should be written
+    """
+    import csv
+    
+    processed_files = log_data.get('processed_files', {})
+    album_art = log_data.get('album_art', {})
+    
+    with open(output_path, 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.writer(csvfile)
+        # Write processed files
+        writer.writerow(['=== PROCESSED FILES ==='])
+        writer.writerow(['File Path', 'Last Processed', 'Has Album Art', 'File Modified Time'])
+        
+        for file_path, file_info in sorted(processed_files.items()):
+            writer.writerow([
+                file_path,
+                file_info.get('last_processed', ''),
+                'Yes' if file_info.get('has_art', False) else 'No',
+                file_info.get('file_mtime', '')
+            ])
+        
+        # Write failed objects
+        writer.writerow([])
+        writer.writerow(['=== FAILED OBJECTS ==='])
+        
+        # Files without album art
+        files_without_art = [(path, info) for path, info in processed_files.items() if not info.get('has_art', False)]
+        if files_without_art:
+            writer.writerow(['--- Files Without Album Art ---'])
+            writer.writerow(['File Path', 'Last Processed', 'File Modified Time'])
+            for file_path, file_info in sorted(files_without_art):
+                writer.writerow([
+                    file_path,
+                    file_info.get('last_processed', ''),
+                    file_info.get('file_mtime', '')
+                ])
+        
+        # Failed album art downloads
+        failed_albums = [(key, info) for key, info in album_art.items() if not info.get('downloaded', False)]
+        if failed_albums:
+            writer.writerow([])
+            writer.writerow(['--- Failed Album Art Downloads ---'])
+            writer.writerow(['Album', 'MusicBrainz ID', 'Last Attempted'])
+            for album_key, art_info in sorted(failed_albums):
+                mb_id = art_info.get('musicbrainz_release_group_id', '') or 'Not found'
+                last_downloaded = art_info.get('last_downloaded', 'Unknown')
+                writer.writerow([album_key.replace('||', ' - '), mb_id, last_downloaded])
+        
+        # Write all album art downloads
+        writer.writerow([])
+        writer.writerow(['=== ALL ALBUM ART DOWNLOADS ==='])
+        writer.writerow(['Album', 'Status', 'MusicBrainz ID', 'Last Attempted'])
+        
+        for album_key, art_info in sorted(album_art.items()):
+            status = "Success" if art_info.get('downloaded', False) else "Failed"
+            mb_id = art_info.get('musicbrainz_release_group_id', '') or 'Not found'
+            last_downloaded = art_info.get('last_downloaded', 'Unknown')
+            writer.writerow([album_key.replace('||', ' - '), status, mb_id, last_downloaded])
+
+
+# ============================================================================
 # Parsing Functions
 # ============================================================================
 

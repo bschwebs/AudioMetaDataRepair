@@ -10,10 +10,12 @@ Supports MP3, FLAC, OGG, Opus, and M4A/MP4 formats.
 from pathlib import Path
 
 # Local imports
-import audio_repair
+from utils import audio_repair
 
 # Constants
-DEFAULT_LOG_FILE = Path('metadata_repair_log.json')
+LOGS_DIR = Path('logs')
+LOGS_DIR.mkdir(exist_ok=True)
+DEFAULT_LOG_FILE = LOGS_DIR / 'metadata_repair_log.json'
 SUPPORTED_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.mp4'}
 
 
